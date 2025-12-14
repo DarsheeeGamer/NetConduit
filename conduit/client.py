@@ -192,6 +192,9 @@ class Client:
             self._connection.set_message_handler(self._handle_message)
             self._connection.set_disconnect_handler(self._handle_disconnect)
             
+            # Mark connection as authenticated (client already authenticated above)
+            self._connection.mark_authenticated()
+            
             # Start connection processing
             await self._connection.start()
             
@@ -399,13 +402,8 @@ class Client:
         if not self._connection:
             raise ConnectionError("Not connected")
         
-        # Send request
+        # Send request - Connection handles the pending RPC tracking
         corr_id = await self._connection.send_rpc_request(method, params)
-        
-        # Create future for response
-        future = asyncio.get_event_loop().create_future()
-        self._pending_rpcs[corr_id] = future
-        
         return corr_id
     
     async def _wait_for_rpc_response(self, correlation_id: int) -> Any:
@@ -415,14 +413,11 @@ class Client:
         Returns:
             Response payload
         """
-        future = self._pending_rpcs.get(correlation_id)
-        if future is None:
-            raise ValueError(f"No pending RPC for correlation ID {correlation_id}")
+        if not self._connection:
+            raise ConnectionError("Not connected")
         
-        try:
-            return await future
-        finally:
-            self._pending_rpcs.pop(correlation_id, None)
+        # Use Connection's RPC response waiting
+        return await self._connection.wait_for_rpc_response(correlation_id)
     
     # === Properties ===
     

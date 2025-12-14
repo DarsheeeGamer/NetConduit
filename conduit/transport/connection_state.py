@@ -33,13 +33,16 @@ VALID_TRANSITIONS: Dict[ConnectionState, Set[ConnectionState]] = {
     },
     ConnectionState.CONNECTING: {
         ConnectionState.AUTHENTICATING,
+        ConnectionState.CONNECTED,  # Allow direct connection for server-side (already authenticated)
         ConnectionState.FAILED,
         ConnectionState.DISCONNECTED,
+        ConnectionState.CLOSING,  # Allow cleanup
     },
     ConnectionState.AUTHENTICATING: {
         ConnectionState.CONNECTED,
         ConnectionState.FAILED,
         ConnectionState.DISCONNECTED,
+        ConnectionState.CLOSING,  # Allow cleanup
     },
     ConnectionState.CONNECTED: {
         ConnectionState.ACTIVE,
@@ -68,6 +71,7 @@ VALID_TRANSITIONS: Dict[ConnectionState, Set[ConnectionState]] = {
     },
     ConnectionState.FAILED: {
         ConnectionState.DISCONNECTED,
+        ConnectionState.CONNECTING,  # Allow reconnection from failed state
     },
 }
 

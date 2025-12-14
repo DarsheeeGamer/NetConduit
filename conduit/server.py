@@ -268,6 +268,9 @@ class Server:
             # Set message handler
             connection.set_message_handler(self._handle_message)
             
+            # Mark as authenticated (server already authenticated above)
+            connection.mark_authenticated()
+            
             # Start connection processing
             await connection.start()
             

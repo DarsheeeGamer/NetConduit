@@ -71,6 +71,7 @@ class Connection:
         self._id = str(uuid.uuid4())
         self._state = ConnectionStateMachine()
         self._session: Optional[Session] = None
+        self._authenticated: bool = False  # Simple auth flag for client-side
         
         # Queues
         self._send_queue: MessageQueue = MessageQueue(maxsize=send_queue_size)
@@ -117,7 +118,7 @@ class Connection:
     @property
     def is_authenticated(self) -> bool:
         """Check if authenticated."""
-        return self._session is not None
+        return self._session is not None or self._authenticated
     
     @property
     def session(self) -> Optional[Session]:
@@ -138,6 +139,10 @@ class Connection:
         """Set session after authentication."""
         self._session = session
     
+    def mark_authenticated(self) -> None:
+        """Mark connection as authenticated (for client-side use)."""
+        self._authenticated = True
+    
     def set_message_handler(self, handler: Callable) -> None:
         """Set message handler callback."""
         self._on_message = handler
@@ -148,7 +153,17 @@ class Connection:
     
     async def start(self) -> None:
         """Start connection processing."""
-        self._state.mark_active()
+        # Proper state transitions: DISCONNECTED -> CONNECTING -> AUTHENTICATING -> CONNECTED -> ACTIVE
+        # For server-side connections that are already authenticated, we skip to CONNECTED
+        if self._state.state == ConnectionState.DISCONNECTED:
+            self._state.start_connecting()
+        
+        # Skip authenticating since server has already handled it
+        if self._state.state == ConnectionState.CONNECTING:
+            self._state.transition_to(ConnectionState.CONNECTED)
+        
+        if self._state.state == ConnectionState.CONNECTED:
+            self._state.mark_active()
         
         # Setup heartbeat callbacks
         self._heartbeat.set_callbacks(
@@ -352,8 +367,13 @@ class Connection:
             future = self._pending_rpcs.get(corr_id)
             
             if future and not future.done():
+                # This connection created this RPC request, handle it
                 future.set_result(message.payload)
+                return
             
+            # Otherwise, pass to external handler (e.g., Client has its own pending_rpcs)
+            if self._on_message:
+                await self._on_message(self, message)
             return
         
         # Handle regular messages - pass to handler
