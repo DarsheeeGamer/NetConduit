@@ -2,13 +2,15 @@
 
 Welcome to the netconduit documentation.
 
-## Quick Links
+## Quick Navigation
 
-| Topic | Description |
+| Guide | Description |
 |-------|-------------|
+| [Quick Start](quickstart.md) | Get running in 5 minutes |
 | [Server Guide](server/README.md) | Complete server documentation |
 | [Client Guide](client/README.md) | Complete client documentation |
-| [Protocol Specification](protocol/README.md) | Binary protocol details |
+| [Examples](examples.md) | Real-world examples |
+| [Protocol Spec](protocol/README.md) | Binary protocol details |
 
 ## Installation
 
@@ -16,12 +18,10 @@ Welcome to the netconduit documentation.
 pip install netconduit
 ```
 
-## Quick Start
+## Basic Usage
 
 ### Server
-
 ```python
-import asyncio
 from conduit import Server, ServerDescriptor
 
 server = Server(ServerDescriptor(password="secret"))
@@ -30,45 +30,34 @@ server = Server(ServerDescriptor(password="secret"))
 async def add(a: int, b: int) -> int:
     return a + b
 
-asyncio.run(server.run())
+await server.run()
 ```
 
 ### Client
-
 ```python
-import asyncio
 from conduit import Client, ClientDescriptor, data
 
 client = Client(ClientDescriptor(
-    server_host="localhost",
-    server_port=8080,
-    password="secret"
+    server_host="localhost", server_port=8080, password="secret"
 ))
 
-async def main():
-    await client.connect()
-    result = await client.rpc.call("add", args=data(a=10, b=20))
-    print(f"Result: {result}")
-    await client.disconnect()
-
-asyncio.run(main())
+await client.connect()
+result = await client.rpc.call("add", args=data(a=10, b=20))
 ```
 
 ## Features
 
-- 🚀 Async/Await based on asyncio
-- 🔌 Raw TCP communication (IPv4 & IPv6)
-- 📦 Custom binary protocol with MessagePack
-- 🔐 Password authentication
-- 📡 Type-safe RPC with Pydantic
-- 💓 Heartbeat monitoring
-- 🚦 Backpressure flow control
-- 🎨 Flask-like decorator API
+- **RPC**: Type-safe remote procedure calls
+- **Messages**: Bidirectional messaging
+- **Broadcasting**: Send to all clients
+- **Heartbeat**: Connection health monitoring
+- **Auto-Reconnect**: Automatic reconnection
+- **Flow Control**: Backpressure handling
 
 ## Support
 
-- GitHub: [DarsheeeGamer/NetConduit](https://github.com/DarsheeeGamer/NetConduit)
-- Email: cleaverdeath@gmail.com
+- **GitHub**: [DarsheeeGamer/NetConduit](https://github.com/DarsheeeGamer/NetConduit)
+- **Email**: cleaverdeath@gmail.com
 
 ## License
 
