@@ -85,6 +85,15 @@ from .protocol import (
 # Transport (for advanced usage)
 from .transport import ConnectionState
 
+# File Transfer
+from .transfer import FileTransfer, TransferProgress
+
+# Streaming
+from .streaming import Stream, StreamManager, ClientStreamConsumer
+
+# Client Connection Pool
+from .pool import ClientPool, PoolStats
+
 # Exceptions
 from .exceptions import (
     ConduitError,
@@ -129,6 +138,19 @@ __all__ = [
     # Connection
     "Connection",
     "ConnectionPool",
+    
+    # File Transfer
+    "FileTransfer",
+    "TransferProgress",
+    
+    # Streaming
+    "Stream",
+    "StreamManager",
+    "ClientStreamConsumer",
+    
+    # Client Pool
+    "ClientPool",
+    "PoolStats",
     
     # Data models
     "MessageData",

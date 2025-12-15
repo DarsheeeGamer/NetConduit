@@ -1,16 +1,21 @@
-# server.py - Interactive Echo Server with Debug Logging
+# server.py - Echo Server with Time Logging
 import asyncio
 import time
 import logging
+from datetime import datetime
 from conduit import Server, ServerDescriptor
 
-# Enable debug logging
+# Configure time-based logging
 logging.basicConfig(
     level=logging.DEBUG,
-    format='%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s',
-    datefmt='%H:%M:%S'
+    format='%(asctime)s.%(msecs)03d | %(levelname)-8s | %(name)-20s | %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger("SERVER")
+
+def timestamp():
+    """Get current timestamp string."""
+    return datetime.now().strftime("%H:%M:%S.%f")[:-3]
 
 server = Server(ServerDescriptor(
     host="0.0.0.0",
@@ -19,77 +24,64 @@ server = Server(ServerDescriptor(
     name="EchoServer",
 ))
 
-# Store connected clients
-clients = {}
+users = {}
 
 
 # === RPC Methods ===
 
 @server.rpc
 async def echo(message: str) -> str:
-    """Echo back the received message."""
-    logger.info(f"[RPC] echo called with: {message}")
+    logger.info(f"[{timestamp()}] RPC echo: {message}")
     return message
 
 @server.rpc
 async def reverse(text: str) -> str:
-    """Reverse text."""
-    logger.info(f"[RPC] reverse called with: {text}")
+    logger.info(f"[{timestamp()}] RPC reverse: {text}")
     return text[::-1]
 
 @server.rpc
 async def calculate(a: float, b: float, op: str) -> float:
-    """Calculate: add, sub, mul, div."""
-    logger.info(f"[RPC] calculate called: {a} {op} {b}")
-    ops = {
-        "add": a + b,
-        "sub": a - b,
-        "mul": a * b,
-        "div": a / b if b != 0 else 0,
-    }
+    logger.info(f"[{timestamp()}] RPC calculate: {a} {op} {b}")
+    ops = {"add": a + b, "sub": a - b, "mul": a * b, "div": a / b if b else 0}
     result = ops.get(op, 0)
-    logger.info(f"[RPC] calculate result: {result}")
+    logger.info(f"[{timestamp()}] Result: {result}")
     return result
 
 @server.rpc
 async def get_time() -> dict:
-    """Get server time."""
-    logger.info("[RPC] get_time called")
-    return {"timestamp": time.time(), "formatted": time.strftime("%Y-%m-%d %H:%M:%S")}
+    now = datetime.now()
+    logger.info(f"[{timestamp()}] RPC get_time")
+    return {
+        "timestamp": time.time(),
+        "formatted": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "iso": now.isoformat(),
+    }
 
 
 # === Message Handlers ===
 
 @server.on("chat")
 async def handle_chat(client, data):
-    """Handle chat messages and broadcast to all."""
     sender = data.get("username", "Anonymous")
     message = data.get("message", "")
+    logger.info(f"[{timestamp()}] CHAT from {sender}: {message}")
     
-    logger.info(f"[MSG] Chat from {sender}: {message}")
-    
-    # Broadcast to all other clients
     count = await server.broadcast("chat", {
         "from": sender,
         "message": message,
         "time": time.time(),
+        "timestamp": timestamp(),
     }, exclude={client.id})
     
-    logger.info(f"[MSG] Broadcast to {count} clients")
+    logger.info(f"[{timestamp()}] Broadcast to {count} clients")
     return {"sent": True, "recipients": count}
 
-@server.on("command")
-async def handle_command(client, data):
-    """Handle custom commands."""
-    cmd = data.get("cmd", "")
-    logger.info(f"[MSG] Command: {cmd}")
-    
-    if cmd == "list_clients":
-        return {"clients": list(clients.keys()), "count": len(clients)}
-    elif cmd == "server_info":
-        return {"name": server.config.name, "clients": server.connection_count}
-    else:
-        return {"error": f"Unknown command: {cmd}"}
+@server.on("ping")
+async def handle_ping(client, data):
+    send_time = data.get("client_time", 0)
+    receive_time = time.time()
+    logger.info(f"[{timestamp()}] PING received, latency: {(receive_time - send_time)*1000:.2f}ms")
+    return {"pong": True, "server_time": receive_time}
 
 
 # === Lifecycle ===
@@ -97,40 +89,39 @@ async def handle_command(client, data):
 @server.on_startup
 async def on_startup(srv):
     logger.info("=" * 60)
-    logger.info(f"Server starting on {srv.address}")
-    logger.info("Available RPC: echo, reverse, calculate, get_time, listall")
-    logger.info("Available messages: chat, command")
+    logger.info(f"[{timestamp()}] Server starting on {srv.address}")
+    logger.info(f"[{timestamp()}] Available RPC: echo, reverse, calculate, get_time")
     logger.info("=" * 60)
 
 @server.on_client_connect
 async def on_client_connect(conn):
-    clients[conn.id] = {"connected_at": time.time()}
-    logger.info(f"[+] Client connected: {conn.id[:8]}... (Total: {len(clients)})")
-    
-    # Notify other clients
-    await server.broadcast("user_joined", {"id": conn.id[:8]}, exclude={conn.id})
+    users[conn.id] = {"connected_at": time.time()}
+    logger.info(f"[{timestamp()}] [+] Client {conn.id[:8]} connected (Total: {len(users)})")
+    await server.broadcast("user_joined", {
+        "id": conn.id[:8],
+        "time": timestamp(),
+    }, exclude={conn.id})
 
 @server.on_client_disconnect
 async def on_client_disconnect(conn):
-    if conn.id in clients:
-        del clients[conn.id]
-    logger.info(f"[-] Client disconnected: {conn.id[:8]}... (Total: {len(clients)})")
-    
-    # Notify other clients
-    await server.broadcast("user_left", {"id": conn.id[:8]})
+    connect_time = users.get(conn.id, {}).get("connected_at", time.time())
+    duration = time.time() - connect_time
+    users.pop(conn.id, None)
+    logger.info(f"[{timestamp()}] [-] Client {conn.id[:8]} disconnected after {duration:.1f}s (Total: {len(users)})")
+    await server.broadcast("user_left", {"id": conn.id[:8], "time": timestamp()})
 
 
-# === Background task ===
+# === Background Tasks ===
 
 async def send_server_updates():
-    """Send periodic server status to all clients."""
     while True:
         await asyncio.sleep(30)
         if server.is_running and server.connection_count > 0:
-            logger.debug(f"Broadcasting server status to {server.connection_count} clients")
+            logger.debug(f"[{timestamp()}] Broadcasting status to {server.connection_count} clients")
             await server.broadcast("server_status", {
                 "clients": server.connection_count,
                 "uptime": time.time(),
+                "time": timestamp(),
             })
 
 

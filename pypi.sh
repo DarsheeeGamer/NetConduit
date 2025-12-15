@@ -3,7 +3,7 @@
 # Usage: ./pypi.sh
 
 set -e
-
+source .venv/bin/activate
 echo "=========================================="
 echo "  netconduit PyPI Upload Script"
 echo "=========================================="
@@ -38,10 +38,6 @@ ls -la dist/
 # Upload to PyPI
 echo ""
 echo "[4/4] Uploading to PyPI..."
-echo ""
-echo "NOTE: You will be prompted for your PyPI API token."
-echo "      Get your token at: https://pypi.org/manage/account/token/"
-echo ""
 
 twine upload dist/*
 
