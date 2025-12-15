@@ -4,7 +4,7 @@ import sys
 from conduit import Client, ClientDescriptor, data
 
 client = Client(ClientDescriptor(
-    server_host="127.0.0.1",
+    server_host="192.168.29.23",
     server_port=9000,
     password="echo_secret",
     name="InteractiveClient",
