@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "netconduit"
-version = "4.0.0"
+version = "5.0.0"
 description = "Production-ready async bidirectional TCP communication library with custom binary protocol, type-safe RPC, and Pydantic integration"
 readme = "README.md"
 license = {text = "MIT"}
