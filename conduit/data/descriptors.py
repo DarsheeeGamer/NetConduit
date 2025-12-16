@@ -87,6 +87,45 @@ class ServerDescriptor(BaseModel):
         default=False,
         description="Enable compression for large messages"
     )
+    
+    # TLS/SSL Configuration
+    ssl_enabled: bool = Field(
+        default=False,
+        description="Enable TLS/SSL encryption"
+    )
+    ssl_cert_file: Optional[str] = Field(
+        default=None,
+        description="Path to SSL certificate file (.pem)"
+    )
+    ssl_key_file: Optional[str] = Field(
+        default=None,
+        description="Path to SSL private key file (.pem)"
+    )
+    ssl_ca_file: Optional[str] = Field(
+        default=None,
+        description="Path to CA certificate file for client verification"
+    )
+    ssl_verify_client: bool = Field(
+        default=False,
+        description="Require client certificate verification"
+    )
+    
+    # Rate Limiting (optional)
+    rate_limit_enabled: bool = Field(
+        default=False,
+        description="Enable per-connection rate limiting"
+    )
+    rate_limit_messages_per_second: int = Field(
+        default=100,
+        ge=1,
+        description="Maximum messages per second per connection"
+    )
+    rate_limit_bytes_per_second: int = Field(
+        default=10 * 1024 * 1024,  # 10MB/s
+        ge=1024,
+        description="Maximum bytes per second per connection"
+    )
+    
     protocol_version: str = Field(
         default="1.0",
         description="Protocol version"
@@ -213,6 +252,29 @@ class ClientDescriptor(BaseModel):
         default=False,
         description="Enable compression for large messages"
     )
+    
+    # TLS/SSL Configuration
+    ssl_enabled: bool = Field(
+        default=False,
+        description="Enable TLS/SSL encryption"
+    )
+    ssl_verify: bool = Field(
+        default=True,
+        description="Verify server certificate"
+    )
+    ssl_ca_file: Optional[str] = Field(
+        default=None,
+        description="Path to CA certificate file for server verification"
+    )
+    ssl_cert_file: Optional[str] = Field(
+        default=None,
+        description="Path to client certificate for mutual TLS"
+    )
+    ssl_key_file: Optional[str] = Field(
+        default=None,
+        description="Path to client private key for mutual TLS"
+    )
+    
     protocol_version: str = Field(
         default="1.0",
         description="Protocol version"
