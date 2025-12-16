@@ -151,14 +151,14 @@ async def set_name(request):
 
 
 async def game_loop():
-    """Main game loop - broadcast state at 60 FPS."""
+    """Heartbeat - sync state for late joiners only (every 1s)."""
     while True:
-        await asyncio.sleep(0.016)  # ~60 FPS broadcast
+        await asyncio.sleep(1.0)  # Just for late joiner sync
         
         if not players:
             continue
         
-        # Broadcast full state periodically
+        # Sync full state occasionally (for late joiners)
         for conn in server.connections:
             if hasattr(conn, 'player_id'):
                 try:
