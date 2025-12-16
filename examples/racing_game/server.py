@@ -76,7 +76,7 @@ async def on_connect(connection):
     })
     
     # Broadcast new player to others
-    for pid, conn in server.connections.items():
+    for conn in server.connections:
         if hasattr(conn, 'player_id') and conn.player_id != player_id:
             await conn.send_message("player_joined", {
                 "player_id": player_id,
@@ -94,7 +94,7 @@ async def on_disconnect(connection):
             print(f"[-] {player_id} left ({len(players)} players)")
             
             # Broadcast player left
-            for pid, conn in server.connections.items():
+            for conn in server.connections:
                 if hasattr(conn, 'player_id') and conn.player_id != player_id:
                     try:
                         await conn.send_message("player_left", {"player_id": player_id})
@@ -121,7 +121,7 @@ async def on_position_update(connection, data):
     })
     
     # Broadcast to all other players
-    for pid, conn in server.connections.items():
+    for conn in server.connections:
         if hasattr(conn, 'player_id') and conn.player_id != player_id:
             try:
                 await conn.send_message("player_update", {
@@ -159,7 +159,7 @@ async def game_loop():
             continue
         
         # Broadcast full state periodically
-        for pid, conn in server.connections.items():
+        for conn in server.connections:
             if hasattr(conn, 'player_id'):
                 try:
                     await conn.send_message("game_state", {"players": players})
