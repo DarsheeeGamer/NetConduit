@@ -65,6 +65,12 @@ dev = [
     "ruff>=0.1",
 ]
 
+docs = [
+    "sphinx>=7.0",
+    "sphinx-rtd-theme>=2.0",
+    "myst-parser>=2.0",
+]
+
 [project.urls]
 Homepage = "https://github.com/DarsheeeGamer/NetConduit"
 Documentation = "https://github.com/DarsheeeGamer/NetConduit#readme"
