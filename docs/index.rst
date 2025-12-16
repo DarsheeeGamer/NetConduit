@@ -1,75 +1,81 @@
 netconduit Documentation
 ========================
 
-**Production-ready async bidirectional TCP communication library with custom binary protocol, type-safe RPC, and Pydantic integration.**
+.. image:: https://img.shields.io/badge/python-3.10+-blue.svg
+   :target: https://www.python.org/downloads/
+
+.. image:: https://img.shields.io/badge/License-MIT-yellow.svg
+   :target: https://opensource.org/licenses/MIT
+
+**Production-ready async bidirectional TCP communication library.**
+
+Built for server-to-server and native application communication with:
+
+- Custom binary protocol (32-byte header + MessagePack)
+- Type-safe RPC with Pydantic validation
+- Bidirectional file transfer and streaming
+- Password-based authentication
+- Automatic reconnection
 
 .. toctree::
    :maxdepth: 2
-   :caption: Getting Started
+   :caption: 🚀 Getting Started
 
-   quickstart
-   installation
-
-.. toctree::
-   :maxdepth: 2
-   :caption: User Guide
-
-   server
-   client
-   rpc
-   streaming
-   file_transfer
+   guides/installation
+   guides/quickstart
 
 .. toctree::
    :maxdepth: 2
-   :caption: API Reference
+   :caption: 📖 User Guide
 
-   api/server
-   api/client
-   api/protocol
-   api/transfer
-   api/streaming
+   guides/server
+   guides/client
+   guides/rpc
+   guides/messages
+   guides/file_transfer
+   guides/streaming
+   guides/authentication
+
+.. toctree::
+   :maxdepth: 2
+   :caption: 📚 API Reference
+
+   api/index
 
 .. toctree::
    :maxdepth: 1
-   :caption: Additional
+   :caption: 📋 Additional
 
    changelog
    benchmarks
 
 
-Features
---------
-
-* **Async/Await** - Built entirely on asyncio
-* **Raw TCP** - Direct TCP (IPv4 & IPv6)
-* **Binary Protocol** - 32-byte header + MessagePack
-* **Password Auth** - SHA256-based authentication
-* **Type-Safe RPC** - Pydantic validation
-* **Bidirectional Streaming** - Both sides can push/consume
-* **File Transfer** - Chunked with checksum verification
-* **Auto-Reconnect** - Exponential backoff
-
-
 Quick Example
 -------------
 
-Server:
+**Server:**
 
 .. code-block:: python
 
     from conduit import Server, ServerDescriptor
 
-    server = Server(ServerDescriptor(password="secret"))
+    server = Server(ServerDescriptor(
+        host="0.0.0.0", 
+        port=8080, 
+        password="secret"
+    ))
 
     @server.rpc
     async def add(a: int, b: int) -> int:
         return a + b
 
-    async def main():
-        await server.run()
+    @server.on("message")
+    async def handle_message(client, data):
+        await server.broadcast("message", data, exclude={client.id})
 
-Client:
+    asyncio.run(server.run())
+
+**Client:**
 
 .. code-block:: python
 
@@ -81,10 +87,16 @@ Client:
         password="secret"
     ))
 
+    @client.on("message")
+    async def on_message(msg):
+        print(f"Received: {msg}")
+
     async def main():
         await client.connect()
         result = await client.rpc.call("add", args=data(a=10, b=20))
         print(result)  # {'success': True, 'data': 30}
+
+    asyncio.run(main())
 
 
 Indices and tables
