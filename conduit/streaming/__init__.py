@@ -1,5 +1,5 @@
-"""Streaming module for continuous data streams."""
+"""Bidirectional streaming module for continuous data streams."""
 
-from .stream import Stream, StreamManager, StreamInfo, ClientStreamConsumer
+from .stream import Stream, BidirectionalStream, StreamManager, StreamInfo
 
-__all__ = ["Stream", "StreamManager", "StreamInfo", "ClientStreamConsumer"]
+__all__ = ["Stream", "BidirectionalStream", "StreamManager", "StreamInfo"]

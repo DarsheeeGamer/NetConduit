@@ -21,6 +21,9 @@ def log(msg: str):
     """Log with timestamp."""
     print(f"[{timestamp()}] {msg}")
 
+# Global username (set at start)
+username = "User"
+
 client = Client(ClientDescriptor(
     server_host="127.0.0.1",
     server_port=9000,
@@ -131,7 +134,7 @@ async def handle_command(line: str) -> bool:
             if not arg:
                 log("Usage: chat <message>")
             else:
-                await client.send("chat", {"username": "User", "message": arg})
+                await client.send("chat", {"username": username, "message": arg})
                 elapsed = (time.time() - start_time) * 1000
                 log(f"Message sent ({elapsed:.2f}ms)")
             
@@ -143,16 +146,51 @@ async def handle_command(line: str) -> bool:
             else:
                 log(f"RPC methods: {result} ({elapsed:.2f}ms)")
             
+        elif cmd == "broadcast":
+            if not arg:
+                log("Usage: broadcast <message>")
+            else:
+                result = await client.rpc.call("send_to_all", args=data(message=arg, sender=username))
+                elapsed = (time.time() - start_time) * 1000
+                log(f"Broadcast: {result} ({elapsed:.2f}ms)")
+        
+        elif cmd == "clients":
+            result = await client.rpc.call("get_clients")
+            elapsed = (time.time() - start_time) * 1000
+            if isinstance(result, dict):
+                log(f"Connected: {result.get('count', 0)} clients ({elapsed:.2f}ms)")
+                for c in result.get("clients", []):
+                    log(f"  - {c.get('id')}")
+            else:
+                log(f"Clients: {result} ({elapsed:.2f}ms)")
+            
         elif cmd == "help":
+            result = await client.rpc.call("help")
+            elapsed = (time.time() - start_time) * 1000
+            
+            if isinstance(result, dict):
+                log("\n=== Server RPC Methods ===")
+                for name, desc in result.get("rpc_methods", {}).items():
+                    log(f"  {name}: {desc}")
+                log("\n=== Message Types ===")
+                for name, desc in result.get("message_types", {}).items():
+                    log(f"  {name}: {desc}")
+                log(f"\n({elapsed:.2f}ms)")
+            else:
+                log(f"Help: {result}")
+            
             log("""
-Commands:
-  echo <text>      - Echo text back from server
-  reverse <text>   - Reverse text on server
-  calc <expr>      - Calculate (e.g., calc 10 + 5)
-  time             - Get server time
-  ping             - Measure latency
-  chat <message>   - Send chat message
+Local Commands:
+  echo <text>      - Echo text
+  reverse <text>   - Reverse text
+  calc <expr>      - Calculate (e.g. 10 + 5)
+  time             - Server time
+  ping             - Latency test
+  chat <msg>       - Send chat
+  broadcast <msg>  - Broadcast to all
+  clients          - List clients
   info             - List RPC methods
+  help             - This help
   quit             - Exit
 """)
             
@@ -186,6 +224,12 @@ async def input_loop():
 
 
 async def main():
+    global username
+    
+    # Ask for username
+    username = input("Enter your username: ").strip() or "User"
+    log(f"Welcome, {username}!")
+    
     log("Connecting to server...")
     connected = await client.connect()
     if not connected:

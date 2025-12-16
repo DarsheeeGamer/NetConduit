@@ -1,5 +1,5 @@
-"""Transfer module for file uploads/downloads."""
+"""Transfer module for bidirectional file uploads/downloads."""
 
-from .file_transfer import FileTransfer, TransferProgress, TransferMetadata
+from .file_transfer import FileTransfer, FileTransferHandler, TransferProgress, TransferMetadata
 
-__all__ = ["FileTransfer", "TransferProgress", "TransferMetadata"]
+__all__ = ["FileTransfer", "FileTransferHandler", "TransferProgress", "TransferMetadata"]

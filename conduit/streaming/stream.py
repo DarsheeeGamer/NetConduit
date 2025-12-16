@@ -1,15 +1,19 @@
 """
-Streaming API Module
+Bidirectional Streaming API Module
 
 Provides continuous data streaming between server and client.
+Both Server and Client can create streams and consume streams.
 """
 
 import asyncio
-from typing import Optional, Callable, Any, AsyncIterator, Dict
+from typing import Optional, Callable, Any, AsyncIterator, Dict, Set, TYPE_CHECKING
 from dataclasses import dataclass, field
 import time
 import logging
 import uuid
+
+if TYPE_CHECKING:
+    from conduit import Server, Client
 
 logger = logging.getLogger(__name__)
 
@@ -19,43 +23,51 @@ class StreamInfo:
     """Information about a stream."""
     stream_id: str
     name: str
+    owner: str  # "server" or client_id
+    direction: str  # "push" (owner sends) or "pull" (owner receives)
     created_at: float = field(default_factory=time.time)
     message_count: int = 0
     bytes_sent: int = 0
 
 
-class Stream:
+class BidirectionalStream:
     """
-    A bidirectional data stream.
+    A bidirectional data stream that can be used by both Server and Client.
     
-    Server usage:
-        stream = Stream("sensor_data")
-        
-        # Push data
+    Server creating a stream (Server pushes, Clients consume):
+        stream = Stream("sensor_data", owner="server")
         await stream.push({"temperature": 22.5})
-        
-        # Subscribe clients
-        @stream.on_subscribe
-        async def client_subscribed(client_id):
-            print(f"Client {client_id} subscribed")
     
-    Client usage:
-        async for data in client.subscribe("sensor_data"):
-            print(f"Received: {data}")
+    Client creating a stream (Client pushes, Server consumes):
+        stream = Stream("video_frames", owner=client_id)
+        await stream.push(frame_data)
     """
     
-    def __init__(self, name: str, buffer_size: int = 100):
+    def __init__(
+        self,
+        name: str,
+        owner: str = "server",
+        buffer_size: int = 100,
+    ):
         self.name = name
+        self.owner = owner
         self.stream_id = str(uuid.uuid4())
         self.buffer_size = buffer_size
         
         self._subscribers: Dict[str, asyncio.Queue] = {}
-        self._running = False
-        self._info = StreamInfo(stream_id=self.stream_id, name=name)
+        self._data_queue: asyncio.Queue = asyncio.Queue(maxsize=buffer_size)
+        self._running = True
+        self._info = StreamInfo(
+            stream_id=self.stream_id,
+            name=name,
+            owner=owner,
+            direction="push",
+        )
         
         # Callbacks
         self._on_subscribe: Optional[Callable] = None
         self._on_unsubscribe: Optional[Callable] = None
+        self._on_data: Optional[Callable] = None
     
     @property
     def info(self) -> StreamInfo:
@@ -64,6 +76,10 @@ class Stream:
     @property
     def subscriber_count(self) -> int:
         return len(self._subscribers)
+    
+    @property
+    def is_active(self) -> bool:
+        return self._running
     
     def on_subscribe(self, handler: Callable) -> Callable:
         """Decorator to register subscribe callback."""
@@ -75,18 +91,26 @@ class Stream:
         self._on_unsubscribe = handler
         return handler
     
+    def on_data(self, handler: Callable) -> Callable:
+        """Decorator to register data received callback."""
+        self._on_data = handler
+        return handler
+    
     async def subscribe(self, subscriber_id: str) -> asyncio.Queue:
-        """Subscribe to this stream."""
+        """Subscribe to this stream to receive data."""
         if subscriber_id in self._subscribers:
             return self._subscribers[subscriber_id]
         
         queue = asyncio.Queue(maxsize=self.buffer_size)
         self._subscribers[subscriber_id] = queue
         
-        logger.debug(f"Stream {self.name}: subscriber {subscriber_id[:8]} joined")
+        logger.debug(f"Stream {self.name}: {subscriber_id[:8]} subscribed")
         
         if self._on_subscribe:
-            await self._on_subscribe(subscriber_id)
+            try:
+                await self._on_subscribe(subscriber_id)
+            except Exception as e:
+                logger.error(f"Subscribe callback error: {e}")
         
         return queue
     
@@ -95,10 +119,13 @@ class Stream:
         if subscriber_id in self._subscribers:
             del self._subscribers[subscriber_id]
             
-            logger.debug(f"Stream {self.name}: subscriber {subscriber_id[:8]} left")
+            logger.debug(f"Stream {self.name}: {subscriber_id[:8]} unsubscribed")
             
             if self._on_unsubscribe:
-                await self._on_unsubscribe(subscriber_id)
+                try:
+                    await self._on_unsubscribe(subscriber_id)
+                except Exception as e:
+                    logger.error(f"Unsubscribe callback error: {e}")
     
     async def push(self, data: Any) -> int:
         """
@@ -107,11 +134,15 @@ class Stream:
         Returns:
             Number of subscribers who received the data
         """
+        if not self._running:
+            return 0
+        
         if not self._subscribers:
             return 0
         
         message = {
             "stream": self.name,
+            "stream_id": self.stream_id,
             "data": data,
             "timestamp": time.time(),
             "sequence": self._info.message_count,
@@ -129,103 +160,241 @@ class Stream:
         
         return sent
     
+    async def receive(self, timeout: Optional[float] = None) -> Optional[Any]:
+        """
+        Receive data posted to this stream (for stream consumers).
+        
+        Args:
+            timeout: Optional timeout in seconds
+            
+        Returns:
+            Data item or None if timeout/closed
+        """
+        try:
+            if timeout:
+                data = await asyncio.wait_for(self._data_queue.get(), timeout=timeout)
+            else:
+                data = await self._data_queue.get()
+            return data
+        except asyncio.TimeoutError:
+            return None
+    
+    async def post(self, data: Any) -> bool:
+        """
+        Post data to this stream (for external producers).
+        
+        Args:
+            data: Data to post
+            
+        Returns:
+            True if posted, False if queue full
+        """
+        if not self._running:
+            return False
+        
+        message = {
+            "stream": self.name,
+            "data": data,
+            "timestamp": time.time(),
+        }
+        
+        try:
+            self._data_queue.put_nowait(message)
+            
+            if self._on_data:
+                try:
+                    await self._on_data(data)
+                except Exception as e:
+                    logger.error(f"Data callback error: {e}")
+            
+            return True
+        except asyncio.QueueFull:
+            return False
+    
     async def close(self) -> None:
         """Close the stream and notify all subscribers."""
+        self._running = False
+        
+        # Notify subscribers
+        close_msg = {"stream": self.name, "closed": True}
         for subscriber_id, queue in list(self._subscribers.items()):
             try:
-                queue.put_nowait({"stream": self.name, "closed": True})
+                queue.put_nowait(close_msg)
             except asyncio.QueueFull:
                 pass
         
         self._subscribers.clear()
         logger.info(f"Stream {self.name} closed")
+    
+    async def __aiter__(self) -> AsyncIterator[Any]:
+        """Async iterator for consuming stream data."""
+        while self._running:
+            try:
+                msg = await asyncio.wait_for(self._data_queue.get(), timeout=1.0)
+                if msg.get("closed"):
+                    break
+                yield msg.get("data")
+            except asyncio.TimeoutError:
+                continue
 
 
 class StreamManager:
     """
-    Manages multiple streams on the server.
+    Manages multiple bidirectional streams.
     
-    Usage:
+    Can be used by both Server and Client.
+    
+    Server usage:
         manager = StreamManager()
+        manager.register_server_handlers(server)
         
-        # Create a stream
+        # Create a stream for pushing to clients
         sensor_stream = manager.create("sensors")
-        
-        # Push data
         await sensor_stream.push({"temp": 22.5})
         
-        # In RPC handler
-        @server.rpc
-        async def subscribe_stream(stream_name: str) -> dict:
-            return manager.subscribe(stream_name, client.id)
+        # Handle client-created streams
+        @manager.on_client_stream("video_frames")
+        async def handle_video(client_id, data):
+            process_frame(data)
+    
+    Client usage:
+        manager = StreamManager()
+        manager.register_client_handlers(client)
+        
+        # Subscribe to server stream
+        async for data in manager.subscribe("sensors"):
+            print(data)
+        
+        # Create a stream to push to server
+        video_stream = manager.create("video_frames")
+        await video_stream.push(frame_data)
     """
     
-    def __init__(self):
-        self._streams: Dict[str, Stream] = {}
+    def __init__(self, owner: str = "server"):
+        self.owner = owner
+        self._streams: Dict[str, BidirectionalStream] = {}
+        self._client_stream_handlers: Dict[str, Callable] = {}
+        self._server: Optional["Server"] = None
+        self._client: Optional["Client"] = None
     
-    def create(self, name: str, buffer_size: int = 100) -> Stream:
+    def create(self, name: str, buffer_size: int = 100) -> BidirectionalStream:
         """Create a new stream."""
         if name in self._streams:
             return self._streams[name]
         
-        stream = Stream(name, buffer_size)
+        stream = BidirectionalStream(name, owner=self.owner, buffer_size=buffer_size)
         self._streams[name] = stream
         logger.info(f"Created stream: {name}")
         return stream
     
-    def get(self, name: str) -> Optional[Stream]:
+    def get(self, name: str) -> Optional[BidirectionalStream]:
         """Get a stream by name."""
         return self._streams.get(name)
     
     def list_streams(self) -> list:
         """List all streams."""
-        return [{"name": s.name, "subscribers": s.subscriber_count} for s in self._streams.values()]
+        return [
+            {
+                "name": s.name,
+                "owner": s.owner,
+                "subscribers": s.subscriber_count,
+                "active": s.is_active,
+            }
+            for s in self._streams.values()
+        ]
     
-    async def subscribe(self, stream_name: str, subscriber_id: str) -> dict:
-        """Subscribe to a stream."""
-        stream = self._streams.get(stream_name)
-        if not stream:
-            return {"error": f"Stream not found: {stream_name}"}
+    def on_client_stream(self, stream_name: str) -> Callable:
+        """Decorator to handle data from client-created streams."""
+        def decorator(handler: Callable) -> Callable:
+            self._client_stream_handlers[stream_name] = handler
+            return handler
+        return decorator
+    
+    # === Server Integration ===
+    
+    def register_server_handlers(self, server: "Server") -> None:
+        """Register stream RPC handlers on a server."""
+        self._server = server
         
-        await stream.subscribe(subscriber_id)
-        return {"subscribed": True, "stream": stream_name}
-    
-    async def unsubscribe(self, stream_name: str, subscriber_id: str) -> dict:
-        """Unsubscribe from a stream."""
-        stream = self._streams.get(stream_name)
-        if stream:
-            await stream.unsubscribe(subscriber_id)
-        return {"unsubscribed": True}
-    
-    async def push(self, stream_name: str, data: Any) -> int:
-        """Push data to a stream."""
-        stream = self._streams.get(stream_name)
-        if not stream:
-            return 0
-        return await stream.push(data)
-    
-    async def close_all(self) -> None:
-        """Close all streams."""
-        for stream in self._streams.values():
-            await stream.close()
-        self._streams.clear()
-
-
-class ClientStreamConsumer:
-    """
-    Client-side stream consumer.
-    
-    Usage:
-        consumer = ClientStreamConsumer(client)
+        @server.rpc
+        async def stream_list() -> dict:
+            """List available streams."""
+            return {"streams": self.list_streams()}
         
-        async for data in consumer.subscribe("sensors"):
-            print(f"Sensor data: {data}")
-    """
+        @server.rpc
+        async def stream_subscribe(stream_name: str) -> dict:
+            """Subscribe to a stream."""
+            stream = self._streams.get(stream_name)
+            if not stream:
+                return {"error": f"Stream not found: {stream_name}"}
+            
+            # Get client ID from context (simplified)
+            client_id = str(uuid.uuid4())  # Would be from connection context
+            await stream.subscribe(client_id)
+            return {"subscribed": True, "stream": stream_name}
+        
+        @server.rpc
+        async def stream_unsubscribe(stream_name: str) -> dict:
+            """Unsubscribe from a stream."""
+            stream = self._streams.get(stream_name)
+            if stream:
+                client_id = str(uuid.uuid4())  # Would be from connection context
+                await stream.unsubscribe(client_id)
+            return {"unsubscribed": True}
+        
+        @server.rpc
+        async def stream_create(stream_name: str) -> dict:
+            """Client requests to create a stream."""
+            if stream_name in self._streams:
+                return {"error": "Stream already exists"}
+            
+            client_id = str(uuid.uuid4())  # Would be from connection context
+            stream = BidirectionalStream(stream_name, owner=client_id)
+            self._streams[stream_name] = stream
+            return {"created": True, "stream": stream_name, "stream_id": stream.stream_id}
+        
+        # Handle client stream data
+        @server.on("stream_data")
+        async def handle_stream_data(client, data):
+            """Receive stream data from client."""
+            stream_name = data.get("stream")
+            payload = data.get("data")
+            
+            # Check if we have a handler
+            handler = self._client_stream_handlers.get(stream_name)
+            if handler:
+                await handler(client.id, payload)
+            
+            # Also post to stream if it exists
+            stream = self._streams.get(stream_name)
+            if stream:
+                await stream.post(payload)
+            
+            return {"received": True}
+        
+        logger.info("Stream handlers registered on server")
     
-    def __init__(self, client):
+    def register_client_handlers(self, client: "Client") -> None:
+        """Register stream handlers on a client."""
         self._client = client
-        self._active_streams: Dict[str, asyncio.Queue] = {}
-        self._handlers: Dict[str, Callable] = {}
+        
+        @client.on("stream_data")
+        async def handle_stream_data(msg):
+            """Receive stream data from server."""
+            stream_name = msg.get("stream")
+            stream = self._streams.get(stream_name)
+            if stream:
+                await stream.post(msg)
+        
+        @client.on("stream_closed")
+        async def handle_stream_closed(msg):
+            """Stream was closed by server."""
+            stream_name = msg.get("stream")
+            stream = self._streams.get(stream_name)
+            if stream:
+                await stream.close()
+        
+        logger.info("Stream handlers registered on client")
     
     async def subscribe(
         self,
@@ -242,6 +411,9 @@ class ClientStreamConsumer:
         Yields:
             Stream data items
         """
+        if not self._client:
+            raise RuntimeError("Client not registered. Call register_client_handlers first.")
+        
         from conduit import data
         
         # Subscribe via RPC
@@ -252,35 +424,71 @@ class ClientStreamConsumer:
         if not result.get("success"):
             raise Exception(f"Failed to subscribe: {result}")
         
-        # Create local queue
-        queue = asyncio.Queue()
-        self._active_streams[stream_name] = queue
-        
-        # Register handler for stream messages
-        @self._client.on(f"stream:{stream_name}")
-        async def stream_handler(msg):
-            if msg.get("closed"):
-                queue.put_nowait(None)
-            else:
-                queue.put_nowait(msg.get("data"))
-                if on_data:
-                    await on_data(msg.get("data"))
+        # Create local stream to receive data
+        stream = self.create(stream_name)
         
         try:
-            while True:
-                data_item = await queue.get()
-                if data_item is None:
-                    break
-                yield data_item
+            async for item in stream:
+                if on_data:
+                    await on_data(item)
+                yield item
         finally:
-            await self.unsubscribe(stream_name)
+            await self._client.rpc.call("stream_unsubscribe", args=data(
+                stream_name=stream_name,
+            ))
     
-    async def unsubscribe(self, stream_name: str) -> None:
-        """Unsubscribe from a stream."""
-        if stream_name in self._active_streams:
-            del self._active_streams[stream_name]
+    async def push_to_server(self, stream_name: str, data_item: Any) -> bool:
+        """Push data to a stream on the server (client-side)."""
+        if not self._client:
+            raise RuntimeError("Client not registered")
         
-        from conduit import data
-        await self._client.rpc.call("stream_unsubscribe", args=data(
-            stream_name=stream_name,
-        ))
+        await self._client.send("stream_data", {
+            "stream": stream_name,
+            "data": data_item,
+            "timestamp": time.time(),
+        })
+        return True
+    
+    async def push_to_clients(
+        self,
+        stream_name: str,
+        data_item: Any,
+        client_ids: Optional[Set[str]] = None,
+    ) -> int:
+        """Push data to stream subscribers (server-side)."""
+        if not self._server:
+            raise RuntimeError("Server not registered")
+        
+        stream = self._streams.get(stream_name)
+        if not stream:
+            return 0
+        
+        # Push locally
+        count = await stream.push(data_item)
+        
+        # Also broadcast to clients
+        msg = {
+            "stream": stream_name,
+            "data": data_item,
+            "timestamp": time.time(),
+        }
+        
+        if client_ids:
+            for cid in client_ids:
+                conn = self._server._pool.get(cid)
+                if conn:
+                    await conn.send_message("stream_data", msg)
+        else:
+            await self._server.broadcast("stream_data", msg)
+        
+        return count
+    
+    async def close_all(self) -> None:
+        """Close all streams."""
+        for stream in self._streams.values():
+            await stream.close()
+        self._streams.clear()
+
+
+# Backwards compatibility
+Stream = BidirectionalStream

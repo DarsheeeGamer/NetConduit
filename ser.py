@@ -57,6 +57,79 @@ async def get_time() -> dict:
         "iso": now.isoformat(),
     }
 
+@server.rpc
+async def broadcast(message_type: str, data: dict, sender: str = "Anonymous") -> dict:
+    """
+    Broadcast a message to all connected clients.
+    
+    Args:
+        message_type: Type of message to broadcast
+        data: Message data to send
+        sender: Name of sender (for logging)
+    
+    Returns:
+        Number of recipients
+    """
+    logger.info(f"[{timestamp()}] RPC broadcast: {message_type} from {sender}")
+    
+    # Add metadata
+    broadcast_data = {
+        **data,
+        "broadcast_from": sender,
+        "broadcast_time": time.time(),
+        "broadcast_timestamp": timestamp(),
+    }
+    
+    count = await server.broadcast(message_type, broadcast_data)
+    logger.info(f"[{timestamp()}] Broadcast '{message_type}' to {count} clients")
+    
+    return {"sent": True, "recipients": count, "message_type": message_type}
+
+@server.rpc
+async def send_to_all(message: str, sender: str = "System") -> dict:
+    """Quick broadcast a chat message to all clients."""
+    logger.info(f"[{timestamp()}] RPC send_to_all: {message}")
+    
+    count = await server.broadcast("chat", {
+        "from": sender,
+        "message": message,
+        "time": time.time(),
+        "timestamp": timestamp(),
+    })
+    
+    return {"sent": True, "recipients": count}
+
+@server.rpc
+async def get_clients() -> dict:
+    """Get list of connected clients."""
+    return {
+        "count": len(users),
+        "clients": [{"id": uid[:8], "connected_at": info.get("connected_at")} 
+                   for uid, info in users.items()]
+    }
+
+@server.rpc
+async def help() -> dict:
+    """Get help information about available RPC methods."""
+    return {
+        "rpc_methods": {
+            "echo": "Echo back a message. Args: message (str)",
+            "reverse": "Reverse text. Args: text (str)",
+            "calculate": "Calculate math. Args: a (float), b (float), op (str: add/sub/mul/div)",
+            "get_time": "Get server time. No args.",
+            "broadcast": "Broadcast to all clients. Args: message_type (str), data (dict), sender (str)",
+            "send_to_all": "Quick chat broadcast. Args: message (str), sender (str)",
+            "get_clients": "List connected clients. No args.",
+            "help": "Show this help. No args.",
+            "listall": "List all RPC methods with details. No args.",
+        },
+        "message_types": {
+            "chat": "Send chat message. Data: {username, message}",
+            "ping": "Ping server. Data: {client_time}",
+        },
+        "usage": "Use client.rpc.call('method', args=data(arg1=val1, arg2=val2))",
+    }
+
 
 # === Message Handlers ===
 

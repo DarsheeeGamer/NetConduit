@@ -86,10 +86,10 @@ from .protocol import (
 from .transport import ConnectionState
 
 # File Transfer
-from .transfer import FileTransfer, TransferProgress
+from .transfer import FileTransfer, FileTransferHandler, TransferProgress
 
 # Streaming
-from .streaming import Stream, StreamManager, ClientStreamConsumer
+from .streaming import Stream, BidirectionalStream, StreamManager
 
 # Client Connection Pool
 from .pool import ClientPool, PoolStats
