@@ -329,11 +329,8 @@ class RacingGame:
             if self.local_car:
                 self.local_car.update(keys)
             
-            # Send position (every 3 frames)
-            send_timer += 1
-            if send_timer >= 3:
-                send_timer = 0
-                await self.send_position()
+            # Send position every frame for smooth updates
+            await self.send_position()
             
             # Draw
             self.draw_track()

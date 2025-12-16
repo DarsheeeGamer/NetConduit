@@ -151,9 +151,9 @@ async def set_name(request):
 
 
 async def game_loop():
-    """Main game loop - broadcast state periodically."""
+    """Main game loop - broadcast state at 60 FPS."""
     while True:
-        await asyncio.sleep(0.05)  # 20 FPS broadcast
+        await asyncio.sleep(0.016)  # ~60 FPS broadcast
         
         if not players:
             continue
