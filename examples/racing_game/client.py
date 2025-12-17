@@ -347,10 +347,11 @@ class RacingGame:
             self.draw_ui()
             
             pygame.display.flip()
-            self.clock.tick(FPS)
             
-            # Small delay to allow asyncio
-            await asyncio.sleep(0.001)
+            # Non-blocking frame timing - yield to asyncio for heartbeats
+            # tick(0) returns immediately, allowing asyncio to process
+            self.clock.tick(0)  # Don't block
+            await asyncio.sleep(1/60)  # ~60 FPS via asyncio (allows heartbeat processing)
         
         pygame.quit()
     
