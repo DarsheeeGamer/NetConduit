@@ -347,11 +347,7 @@ class RacingGame:
             self.draw_ui()
             
             pygame.display.flip()
-            
-            # Non-blocking frame timing - yield to asyncio for heartbeats
-            # tick(0) returns immediately, allowing asyncio to process
-            self.clock.tick(0)  # Don't block
-            await asyncio.sleep(1/60)  # ~60 FPS via asyncio (allows heartbeat processing)
+            self.clock.tick(FPS)  # Standard blocking - heartbeat handled by library in separate thread
         
         pygame.quit()
     

@@ -6,6 +6,7 @@ Monitors connection health via periodic heartbeats.
 
 import asyncio
 import time
+import threading
 from typing import Optional, Callable, Awaitable
 from dataclasses import dataclass, field
 import logging
@@ -55,7 +56,7 @@ class HeartbeatMonitor:
     Monitors connection health via heartbeats.
     
     Sends periodic pings and expects pongs within timeout.
-    Triggers callback if connection appears dead.
+    Uses a separate thread for reliable heartbeat processing.
     """
     
     def __init__(
@@ -64,6 +65,7 @@ class HeartbeatMonitor:
         timeout: float = 90.0,
         on_send_ping: Optional[HeartbeatSendCallback] = None,
         on_timeout: Optional[HeartbeatTimeoutCallback] = None,
+        use_thread: bool = True,  # Run heartbeats in separate thread
     ):
         """
         Initialize heartbeat monitor.
@@ -73,18 +75,23 @@ class HeartbeatMonitor:
             timeout: Time without pong before timeout
             on_send_ping: Callback to send ping
             on_timeout: Callback on heartbeat timeout
+            use_thread: If True, run heartbeat loop in separate thread
         """
         self._interval = interval
         self._timeout = timeout
         self._on_send_ping = on_send_ping
         self._on_timeout = on_timeout
+        self._use_thread = use_thread
         
         self._running = False
         self._task: Optional[asyncio.Task] = None
+        self._thread: Optional[threading.Thread] = None
+        self._thread_loop: Optional[asyncio.AbstractEventLoop] = None
         self._stats = HeartbeatStats()
         
         self._last_pong_time: float = 0.0
         self._pending_ping_time: Optional[float] = None
+        self._main_loop: Optional[asyncio.AbstractEventLoop] = None
     
     def set_callbacks(
         self,
@@ -111,9 +118,60 @@ class HeartbeatMonitor:
         
         self._running = True
         self._last_pong_time = time.time()
-        self._task = asyncio.create_task(self._heartbeat_loop())
+        self._main_loop = asyncio.get_running_loop()
         
-        logger.debug(f"Heartbeat monitor started (interval={self._interval}s, timeout={self._timeout}s)")
+        if self._use_thread:
+            # Start heartbeat in separate thread for reliability
+            self._thread = threading.Thread(target=self._run_threaded_loop, daemon=True)
+            self._thread.start()
+            logger.debug(f"Heartbeat monitor started in thread (interval={self._interval}s)")
+        else:
+            # Use asyncio task in current loop
+            self._task = asyncio.create_task(self._heartbeat_loop())
+            logger.debug(f"Heartbeat monitor started (interval={self._interval}s, timeout={self._timeout}s)")
+    
+    def _run_threaded_loop(self) -> None:
+        """Run heartbeat loop in dedicated thread."""
+        self._thread_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._thread_loop)
+        try:
+            self._thread_loop.run_until_complete(self._heartbeat_loop_threaded())
+        finally:
+            self._thread_loop.close()
+    
+    async def _heartbeat_loop_threaded(self) -> None:
+        """Heartbeat loop for thread - uses thread-safe calls to main loop."""
+        while self._running:
+            try:
+                await asyncio.sleep(self._interval)
+                
+                if not self._running:
+                    break
+                
+                # Check timeout
+                time_since_pong = time.time() - self._last_pong_time
+                
+                if time_since_pong > self._timeout:
+                    self._stats.timeouts += 1
+                    logger.warning(f"Heartbeat timeout! No pong for {time_since_pong:.1f}s")
+                    
+                    if self._on_timeout and self._main_loop:
+                        asyncio.run_coroutine_threadsafe(self._on_timeout(), self._main_loop)
+                    continue
+                
+                # Send ping via main loop
+                self._pending_ping_time = time.time()
+                self._stats.pings_sent += 1
+                self._stats.last_ping_sent = self._pending_ping_time
+                
+                if self._on_send_ping and self._main_loop:
+                    asyncio.run_coroutine_threadsafe(self._on_send_ping(), self._main_loop)
+                    
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Heartbeat error: {e}")
+                await asyncio.sleep(1)
     
     async def stop(self) -> None:
         """Stop heartbeat monitoring."""
@@ -121,6 +179,13 @@ class HeartbeatMonitor:
             return
         
         self._running = False
+        
+        if self._thread and self._thread.is_alive():
+            # Stop thread loop
+            if self._thread_loop:
+                self._thread_loop.call_soon_threadsafe(self._thread_loop.stop)
+            self._thread.join(timeout=2.0)
+            self._thread = None
         
         if self._task:
             self._task.cancel()
