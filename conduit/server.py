@@ -392,7 +392,7 @@ class Server:
     async def _handle_client_connect(self, connection: Connection) -> None:
         """Called when client connects and authenticates."""
         conn_id = connection.id[:8]  # Short ID
-        logger.info(f"Connection {conn_id} [state: {connection.state.current.name}] - client connected")
+        logger.info(f"Connection {conn_id} [state: {connection.state.name}] - client connected")
         
         for hook in self._on_connect:
             try:
@@ -403,7 +403,7 @@ class Server:
     async def _handle_client_disconnect(self, connection: Connection) -> None:
         """Called when client disconnects."""
         conn_id = connection.id[:8]  # Short ID
-        logger.info(f"Connection {conn_id} [state: {connection.state.current.name}] - client disconnected")
+        logger.info(f"Connection {conn_id} [state: {connection.state.name}] - client disconnected")
         
         # Cleanup rate limiter for this connection
         if connection.id in self._connection_limiters:
@@ -424,6 +424,21 @@ class Server:
     ) -> None:
         """Handle incoming message."""
         msg_type = message.message_type
+        
+        # Rate limiting enforcement
+        if self._rate_limit_config.enabled:
+            # Get or create rate limiter for this connection
+            if connection.id not in self._connection_limiters:
+                self._connection_limiters[connection.id] = self._rate_limit_config.create_limiter()
+            
+            limiter = self._connection_limiters[connection.id]
+            msg_size = len(message.payload) if message.payload else 0
+            
+            if not limiter.try_acquire(msg_size):
+                conn_id = connection.id[:8]
+                logger.warning(f"Rate limit exceeded for connection {conn_id}")
+                # Optionally send error response or just drop the message
+                return
         
         # Handle RPC requests
         if msg_type == MessageType.RPC_REQUEST:
