@@ -391,6 +391,9 @@ class Server:
     
     async def _handle_client_connect(self, connection: Connection) -> None:
         """Called when client connects and authenticates."""
+        conn_id = connection.id[:8]  # Short ID
+        logger.info(f"Connection {conn_id} [state: {connection.state.current.name}] - client connected")
+        
         for hook in self._on_connect:
             try:
                 await hook(connection)
@@ -399,6 +402,13 @@ class Server:
     
     async def _handle_client_disconnect(self, connection: Connection) -> None:
         """Called when client disconnects."""
+        conn_id = connection.id[:8]  # Short ID
+        logger.info(f"Connection {conn_id} [state: {connection.state.current.name}] - client disconnected")
+        
+        # Cleanup rate limiter for this connection
+        if connection.id in self._connection_limiters:
+            del self._connection_limiters[connection.id]
+        
         for hook in self._on_disconnect:
             try:
                 await hook(connection)
