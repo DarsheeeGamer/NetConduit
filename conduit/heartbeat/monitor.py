@@ -154,6 +154,10 @@ class HeartbeatMonitor:
                 if not self._running:
                     break
                 
+                # Check if main loop is still running
+                if not self._main_loop or self._main_loop.is_closed():
+                    break
+                
                 # Check timeout
                 time_since_pong = time.time() - self._last_pong_time
                 
@@ -161,8 +165,11 @@ class HeartbeatMonitor:
                     self._stats.timeouts += 1
                     logger.warning(f"Heartbeat timeout! No pong for {time_since_pong:.1f}s")
                     
-                    if self._on_timeout and self._main_loop:
-                        asyncio.run_coroutine_threadsafe(self._on_timeout(), self._main_loop)
+                    if self._on_timeout and self._main_loop and not self._main_loop.is_closed():
+                        try:
+                            asyncio.run_coroutine_threadsafe(self._on_timeout(), self._main_loop)
+                        except RuntimeError:
+                            break  # Loop closed
                     continue
                 
                 # Send ping via main loop
@@ -170,12 +177,17 @@ class HeartbeatMonitor:
                 self._stats.pings_sent += 1
                 self._stats.last_ping_sent = self._pending_ping_time
                 
-                if self._on_send_ping and self._main_loop:
-                    asyncio.run_coroutine_threadsafe(self._on_send_ping(), self._main_loop)
+                if self._on_send_ping and self._main_loop and not self._main_loop.is_closed():
+                    try:
+                        asyncio.run_coroutine_threadsafe(self._on_send_ping(), self._main_loop)
+                    except RuntimeError:
+                        break  # Loop closed
                     
             except asyncio.CancelledError:
                 break
             except Exception as e:
+                if not self._running:
+                    break
                 logger.error(f"Heartbeat error: {e}")
                 await asyncio.sleep(1)
     
