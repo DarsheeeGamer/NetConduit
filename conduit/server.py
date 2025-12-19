@@ -6,6 +6,7 @@ The main server class for accepting and handling client connections.
 
 import asyncio
 import hashlib
+from enum import Enum, auto
 from typing import Any, Callable, Dict, List, Optional, Awaitable, Union
 import logging
 
@@ -16,8 +17,18 @@ from .connection import Connection, ConnectionPool
 from .messages import MessageRouter, Message
 from .rpc import RPCRegistry, RPCDispatcher
 from .response import Response, Error
+from .ratelimit import RateLimiter, RateLimitConfig
 
 logger = logging.getLogger(__name__)
+
+
+class ServerState(Enum):
+    """Server lifecycle states."""
+    CREATED = auto()       # Server object created, not started
+    INITIALIZING = auto()  # Server is starting up
+    RUNNING = auto()       # Server is accepting connections
+    STOPPING = auto()      # Server is shutting down
+    CLOSED = auto()        # Server has stopped
 
 
 # Callback types
@@ -106,8 +117,21 @@ class Server:
         self._on_connect: List[ConnectionHook] = []
         self._on_disconnect: List[ConnectionHook] = []
         
+        # Rate limiting config
+        self._rate_limit_config = RateLimitConfig(
+            enabled=config.rate_limit_enabled,
+            messages_per_second=config.rate_limit_messages_per_second,
+            bytes_per_second=config.rate_limit_bytes_per_second,
+        )
+        
+        # Connection rate limiters (per connection)
+        self._connection_limiters: Dict[str, RateLimiter] = {}
+        
         # State
+        self._server_state = ServerState.CREATED
         self._running = False
+        
+        logger.info(f"Server '{config.name}' created [state: CREATED]")
     
     # === Decorators ===
     
@@ -172,6 +196,11 @@ class Server:
         self._on_shutdown.append(handler)
         return handler
     
+    @property
+    def state(self) -> ServerState:
+        """Get current server state."""
+        return self._server_state
+    
     def on_client_connect(self, handler: ConnectionHook) -> ConnectionHook:
         """Register client connect hook."""
         self._on_connect.append(handler)
@@ -200,7 +229,8 @@ class Server:
         if self._running:
             return
         
-        logger.info(f"Starting server {self._config.name} v{self._config.version}")
+        self._server_state = ServerState.INITIALIZING
+        logger.info(f"Server '{self._config.name}' [state: INITIALIZING]")
         
         # Run startup hooks
         for hook in self._on_startup:
@@ -217,20 +247,27 @@ class Server:
         await self._tcp_server.start()
         
         self._running = True
+        self._server_state = ServerState.RUNNING
         
-        logger.info(f"Server listening on {self._config.host}:{self._config.port}")
+        tls_note = " (TLS)" if self._config.ssl_enabled else ""
+        rate_note = f" (rate limit: {self._config.rate_limit_messages_per_second}/s)" if self._config.rate_limit_enabled else ""
+        logger.info(f"Server '{self._config.name}' listening on {self._config.host}:{self._config.port}{tls_note}{rate_note} [state: RUNNING]")
     
     async def stop(self) -> None:
         """Stop the server."""
         if not self._running:
             return
         
-        logger.info("Stopping server...")
+        self._server_state = ServerState.STOPPING
+        logger.info(f"Server '{self._config.name}' [state: STOPPING]")
         
         self._running = False
         
         # Close all connections
         await self._pool.close_all()
+        
+        # Clear rate limiters
+        self._connection_limiters.clear()
         
         # Stop TCP server
         await self._tcp_server.stop()
@@ -239,7 +276,8 @@ class Server:
         for hook in self._on_shutdown:
             await hook(self)
         
-        logger.info("Server stopped")
+        self._server_state = ServerState.CLOSED
+        logger.info(f"Server '{self._config.name}' [state: CLOSED]")
     
     # === Connection Handling ===
     

@@ -3,6 +3,11 @@
 import asyncio
 import sys
 import os
+import logging
+
+# Enable logging to see server state
+logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(name)s - %(message)s')
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from conduit import Server, ServerDescriptor
@@ -22,13 +27,15 @@ async def on_ping(connection, data):
     await connection.send_message("pong", {"message": "TLS works!"})
 
 async def main():
-    print("Starting TLS server on port 9998...")
+    print(f"Server state: {server.state}")
     await server.start()
+    print(f"Server state: {server.state}")
     try:
-        while True:
-            await asyncio.sleep(1)
+        await asyncio.sleep(10)
     except KeyboardInterrupt:
-        await server.stop()
+        pass
+    await server.stop()
+    print(f"Server state: {server.state}")
 
 if __name__ == "__main__":
     asyncio.run(main())
