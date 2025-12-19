@@ -26,9 +26,14 @@ async def main():
     if connected:
         print("Connected! Sending ping...")
         await client.send("ping", {"test": "hello TLS"})
-        await asyncio.sleep(2)
+        print("\nPress Ctrl+C to disconnect...\n")
+        try:
+            while True:
+                await asyncio.sleep(1)
+        except KeyboardInterrupt:
+            pass
         await client.disconnect()
-        print("TLS test passed!")
+        print("Disconnected cleanly!")
     else:
         print("Connection failed!")
 

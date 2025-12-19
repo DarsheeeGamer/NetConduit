@@ -30,8 +30,10 @@ async def main():
     print(f"Server state: {server.state}")
     await server.start()
     print(f"Server state: {server.state}")
+    print("\nPress Ctrl+C to stop...\n")
     try:
-        await asyncio.sleep(10)
+        while True:
+            await asyncio.sleep(1)
     except KeyboardInterrupt:
         pass
     await server.stop()

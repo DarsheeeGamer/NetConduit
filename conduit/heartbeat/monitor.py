@@ -136,8 +136,14 @@ class HeartbeatMonitor:
         asyncio.set_event_loop(self._thread_loop)
         try:
             self._thread_loop.run_until_complete(self._heartbeat_loop_threaded())
+        except RuntimeError:
+            # Expected when loop is stopped during shutdown
+            pass
         finally:
-            self._thread_loop.close()
+            try:
+                self._thread_loop.close()
+            except Exception:
+                pass
     
     async def _heartbeat_loop_threaded(self) -> None:
         """Heartbeat loop for thread - uses thread-safe calls to main loop."""
