@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, List, Optional, Awaitable, Union
 import logging
 
 from .data.descriptors import ServerDescriptor
-from .transport import TCPServer, TCPSocket, AuthHandler
+from .transport import TCPServer, TCPSocket, AuthHandler, TLSConfig, create_server_ssl_context
 from .protocol import ProtocolEncoder, ProtocolDecoder, MessageType, DecodedMessage
 from .connection import Connection, ConnectionPool
 from .messages import MessageRouter, Message
@@ -55,12 +55,26 @@ class Server:
         """
         self._config = config
         
+        # Create TLS context if SSL enabled
+        ssl_context = None
+        if config.ssl_enabled:
+            tls_config = TLSConfig(
+                enabled=True,
+                cert_file=config.ssl_cert_file,
+                key_file=config.ssl_key_file,
+                ca_file=config.ssl_ca_file,
+                verify_client=config.ssl_verify_client,
+            )
+            ssl_context = create_server_ssl_context(tls_config)
+            logger.info("TLS enabled for server")
+        
         # TCP server
         self._tcp_server = TCPServer(
             host=config.host,
             port=config.port,
             ipv6=config.ipv6,
             max_connections=config.max_connections,
+            ssl_context=ssl_context,
         )
         
         # Authentication

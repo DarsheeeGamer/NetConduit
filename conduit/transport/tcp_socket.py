@@ -58,7 +58,8 @@ class TCPSocket:
         port: int,
         timeout: float = 10.0,
         use_ipv6: bool = False,
-        buffer_size: int = 65536
+        buffer_size: int = 65536,
+        ssl_context=None,  # Optional SSL context for TLS
     ) -> 'TCPSocket':
         """
         Connect to a remote server.
@@ -69,6 +70,7 @@ class TCPSocket:
             timeout: Connection timeout
             use_ipv6: Use IPv6 family
             buffer_size: Socket buffer size
+            ssl_context: Optional SSL context for TLS encryption
             
         Returns:
             Connected TCPSocket
@@ -80,6 +82,8 @@ class TCPSocket:
                 host=host,
                 port=port,
                 family=family,
+                ssl=ssl_context,
+                server_hostname=host if ssl_context else None,
             ),
             timeout=timeout
         )
@@ -200,7 +204,8 @@ class TCPServer:
         handler: Optional[ConnectionHandler] = None,
         ipv6: bool = False,
         buffer_size: int = 65536,
-        max_connections: int = 100
+        max_connections: int = 100,
+        ssl_context=None,  # Optional SSL context for TLS
     ):
         """
         Initialize TCP server.
@@ -212,6 +217,7 @@ class TCPServer:
             ipv6: Enable IPv6
             buffer_size: Socket buffer size
             max_connections: Maximum concurrent connections
+            ssl_context: Optional SSL context for TLS encryption
         """
         self._host = host
         self._port = port
@@ -219,6 +225,7 @@ class TCPServer:
         self._ipv6 = ipv6
         self._buffer_size = buffer_size
         self._max_connections = max_connections
+        self._ssl_context = ssl_context
         
         self._server: Optional[asyncio.Server] = None
         self._running = False
@@ -228,6 +235,10 @@ class TCPServer:
     def set_handler(self, handler: ConnectionHandler) -> None:
         """Set the connection handler."""
         self._handler = handler
+    
+    def set_ssl_context(self, ssl_context) -> None:
+        """Set the SSL context for TLS."""
+        self._ssl_context = ssl_context
     
     async def start(self) -> None:
         """Start the server."""
@@ -246,10 +257,12 @@ class TCPServer:
             family=family,
             reuse_address=True,
             start_serving=True,
+            ssl=self._ssl_context,  # TLS support
         )
         
         self._running = True
-        logger.info(f"Server listening on {self._host}:{self._port}")
+        tls_status = " (TLS)" if self._ssl_context else ""
+        logger.info(f"Server listening on {self._host}:{self._port}{tls_status}")
     
     async def stop(self) -> None:
         """Stop the server."""

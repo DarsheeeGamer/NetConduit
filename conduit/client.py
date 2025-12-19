@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Awaitable, Union
 import logging
 
 from .data.descriptors import ClientDescriptor
-from .transport import TCPSocket, ConnectionStateMachine, ConnectionState
+from .transport import TCPSocket, ConnectionStateMachine, ConnectionState, TLSConfig, create_client_ssl_context
 from .protocol import ProtocolEncoder, ProtocolDecoder, MessageType, DecodedMessage
 from .connection import Connection
 from .messages import MessageRouter, Message
@@ -156,6 +156,19 @@ class Client:
             
             logger.info(f"Connecting to {self._config.server_host}:{self._config.server_port}")
             
+            # Create TLS context if SSL enabled
+            ssl_context = None
+            if self._config.ssl_enabled:
+                tls_config = TLSConfig(
+                    enabled=True,
+                    cert_file=self._config.ssl_cert_file,
+                    key_file=self._config.ssl_key_file,
+                    ca_file=self._config.ssl_ca_file,
+                    verify=self._config.ssl_verify,
+                )
+                ssl_context = create_client_ssl_context(tls_config)
+                logger.info("TLS enabled for client connection")
+            
             # Connect TCP socket
             self._socket = await TCPSocket.connect(
                 host=self._config.server_host,
@@ -163,6 +176,7 @@ class Client:
                 timeout=self._config.connect_timeout,
                 use_ipv6=self._config.use_ipv6,
                 buffer_size=self._config.buffer_size,
+                ssl_context=ssl_context,
             )
             
             self._state.start_authenticating()
