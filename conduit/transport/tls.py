@@ -79,8 +79,9 @@ def create_client_ssl_context(config: TLSConfig) -> Optional[ssl.SSLContext]:
         else:
             context.load_default_certs()
     else:
-        context.verify_mode = ssl.CERT_NONE
+        # Must set check_hostname=False BEFORE verify_mode=CERT_NONE
         context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
     
     # Client certificate (mutual TLS)
     if config.cert_file and config.key_file:
